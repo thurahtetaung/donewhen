@@ -1,6 +1,7 @@
 // Render markdown to HTML and mermaid code fences to SVG.
 import { marked } from 'marked';
 import { safeLinkHref, LINK_REL } from './url.js';
+import { splitIssueKeys, usablePrefix } from './issuekeys.js';
 
 let mermaidPromise;
 let mermaidCounter = 0;
@@ -37,10 +38,51 @@ async function getMermaid() {
 
 marked.setOptions({ gfm: true, breaks: true });
 
+// walk calls visit(token, inLink) for every token, a parent before its
+// children, including table cells and list items. inLink is true inside a
+// link, so text there can stay plain and links never nest. It is marked's
+// walkTokens without the cost: marked's own walk gathers results with
+// concat, which takes time growing with the square of the token count.
+function walk(tokens, visit, inLink = false) {
+	for (const token of tokens) {
+		visit(token, inLink);
+		const childInLink = inLink || token.type === 'link';
+		if (token.type === 'table') {
+			for (const cell of token.header) walk(cell.tokens, visit, childInLink);
+			for (const row of token.rows) for (const cell of row) walk(cell.tokens, visit, childInLink);
+		} else if (token.type === 'list') {
+			walk(token.items, visit, childInLink);
+		} else if (token.tokens) {
+			walk(token.tokens, visit, childInLink);
+		}
+	}
+}
+
+// linkIssueKeys links ticket keys typed in text (DW-12) to their issue page.
+// It runs on marked's tokens after the whole text is parsed, so emphasis,
+// code, links, autolinks and e-mail addresses are already their own tokens:
+// only plain text is searched, with the rule in issuekeys.js. Text inside a
+// link stays plain so links never nest.
+function linkIssueKeys(token, inLink, prefix) {
+	// Inline text has no child tokens; its text is already escaped HTML.
+	if (token.type !== 'text' || token.tokens || inLink) return;
+	const parts = splitIssueKeys(token.text, prefix);
+	if (!parts.some((p) => p.kind === 'key')) return;
+	token.text = parts
+		.map((p) =>
+			p.kind === 'key'
+				? `<a class="issue-key" href="/issue/${encodeURIComponent(p.text)}">${p.text}</a>`
+				: p.text
+		)
+		.join('');
+}
+
 // renderMarkdown returns HTML with mermaid blocks left as <pre data-mermaid>
-// placeholders that renderMermaid() then upgrades to SVG.
-export function renderMarkdown(src) {
+// placeholders that renderMermaid() then upgrades to SVG. Keys with keyPrefix
+// (the active workspace's) become links to their issue.
+export function renderMarkdown(src, keyPrefix = '') {
 	if (!src) return '';
+	const prefix = usablePrefix(keyPrefix);
 	const renderer = new marked.Renderer();
 	const origCode = renderer.code.bind(renderer);
 	renderer.code = (code, lang) => {
@@ -70,7 +112,11 @@ export function renderMarkdown(src) {
 		}
 		return String(origLink(...args)).replace(/^<a /, `<a rel="${LINK_REL}" `);
 	};
-	return marked.parse(src, { renderer });
+	// What marked.parse does, with our own walk between lexer and parser.
+	const options = { ...marked.defaults, renderer };
+	const tokens = marked.lexer(src, options);
+	if (prefix) walk(tokens, (token, inLink) => linkIssueKeys(token, inLink, prefix));
+	return marked.parser(tokens, options);
 }
 
 function escapeHtml(s) {

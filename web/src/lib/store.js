@@ -7,6 +7,14 @@ export const workspaces = writable([]); // the caller's memberships
 export const activeWorkspace = writable(null); // the one everything is scoped to
 // What the active workspace calls its AI actor (Settings → Workspace).
 export const aiName = derived(activeWorkspace, (w) => w?.aiName || 'Clanker');
+// The active workspace's key prefix. Markdown and checklist items link keys
+// with it (issuekeys.js): the issue page opens a key in the active workspace,
+// so a key of another workspace would not be found. Only the current prefix
+// links: issues keep the key they were made with, so after the prefix is
+// renamed their old keys still open at /issue/KEY but show as plain text. A
+// derived string tells subscribers only when the prefix changes, so rendered
+// text is not redone on every workspace set.
+export const keyPrefix = derived(activeWorkspace, (w) => w?.keyPrefix || '');
 export const states = writable([]);
 export const projects = writable([]); // active epics only; archived ones are hidden
 export const archivedProjects = writable([]);
