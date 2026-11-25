@@ -1,6 +1,7 @@
 // Render markdown to HTML and mermaid code fences to SVG.
 import { marked } from 'marked';
 import { safeLinkHref, LINK_REL } from './url.js';
+import { splitIssueKeys, usablePrefix } from './issuekeys.js';
 
 let mermaidPromise;
 let mermaidCounter = 0;
@@ -37,10 +38,43 @@ async function getMermaid() {
 
 marked.setOptions({ gfm: true, breaks: true });
 
+// linkIssueKeys links ticket keys typed in text (DW-12) to their issue page.
+// It runs on marked's tokens after the whole text is parsed, so emphasis,
+// code, links, autolinks and e-mail addresses are already their own tokens:
+// only plain text is searched, with the rule in issuekeys.js. Text inside a
+// link stays plain so links never nest.
+function linkIssueKeys(prefix) {
+	return (token) => {
+		if (token.type === 'link') return markInLink(token.tokens);
+		// Inline text has no child tokens; its text is already escaped HTML.
+		if (token.type !== 'text' || token.tokens || token.inLink) return;
+		const parts = splitIssueKeys(token.text, prefix);
+		if (!parts.some((p) => p.kind === 'key')) return;
+		token.text = parts
+			.map((p) =>
+				p.kind === 'key'
+					? `<a class="issue-key" href="/issue/${encodeURIComponent(p.text)}">${p.text}</a>`
+					: p.text
+			)
+			.join('');
+	};
+}
+
+// markInLink flags every token inside a link. The walk visits a link before
+// its children, so the flag is set by the time their text is reached.
+function markInLink(tokens) {
+	for (const t of tokens || []) {
+		t.inLink = true;
+		markInLink(t.tokens);
+	}
+}
+
 // renderMarkdown returns HTML with mermaid blocks left as <pre data-mermaid>
-// placeholders that renderMermaid() then upgrades to SVG.
-export function renderMarkdown(src) {
+// placeholders that renderMermaid() then upgrades to SVG. Keys with keyPrefix
+// (the active workspace's) become links to their issue.
+export function renderMarkdown(src, keyPrefix = '') {
 	if (!src) return '';
+	const prefix = usablePrefix(keyPrefix);
 	const renderer = new marked.Renderer();
 	const origCode = renderer.code.bind(renderer);
 	renderer.code = (code, lang) => {
@@ -70,7 +104,7 @@ export function renderMarkdown(src) {
 		}
 		return String(origLink(...args)).replace(/^<a /, `<a rel="${LINK_REL}" `);
 	};
-	return marked.parse(src, { renderer });
+	return marked.parse(src, prefix ? { renderer, walkTokens: linkIssueKeys(prefix) } : { renderer });
 }
 
 function escapeHtml(s) {

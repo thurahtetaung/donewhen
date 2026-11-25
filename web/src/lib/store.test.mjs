@@ -19,7 +19,7 @@ globalThis.fetch = async (url, init = {}) => {
 };
 
 const store = await import('./store.js');
-const { issues, allIssues, activeWorkspace, activeProject, projects, applyEvent, moveIssueTo, inboxTotal } = store;
+const { issues, allIssues, activeWorkspace, activeProject, projects, applyEvent, moveIssueTo, inboxTotal, keyPrefix, workspaces } = store;
 
 const mk = (id, stateId, position, extra = {}) => ({
 	id,
@@ -105,4 +105,20 @@ test('events: other workspace ignored; outside the epic filter not added', () =>
 test('inbox formula is needsReview + waiting', () => {
 	assert.equal(inboxTotal({ needsReview: [1, 2], waiting: [3] }), 3);
 	assert.equal(inboxTotal(null), 0);
+});
+
+test('keyPrefix follows the active workspace and tells only on a change', () => {
+	const before = [get(workspaces), get(activeWorkspace)];
+	// Being a member is not enough: only the active workspace's keys link.
+	workspaces.set([{ id: 'ws1', keyPrefix: 'DW' }]);
+	activeWorkspace.set(null);
+	const seen = [];
+	const stop = keyPrefix.subscribe((p) => seen.push(p));
+	activeWorkspace.set({ id: 'ws1', keyPrefix: 'DW', name: 'One' });
+	activeWorkspace.set({ id: 'ws1', keyPrefix: 'DW', name: 'Renamed' }); // same prefix: no news
+	activeWorkspace.set(null);
+	stop();
+	workspaces.set(before[0]);
+	activeWorkspace.set(before[1]);
+	assert.deepEqual(seen, ['', 'DW', '']);
 });

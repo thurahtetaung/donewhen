@@ -1,6 +1,7 @@
 <script>
 	import { renderMarkdown, renderMermaid } from '$lib/markdown.js';
 	import DiagramViewer from './DiagramViewer.svelte';
+	import { keyPrefix } from '$lib/store.js';
 
 	let { source = '' } = $props();
 	let el = $state(null);
@@ -21,8 +22,12 @@
 
 	$effect(() => {
 		const src = source;
+		// Keys of the active workspace link to their issue. keyPrefix tells only
+		// when the prefix changes, so text and diagrams are not redrawn for
+		// nothing.
+		const prefix = $keyPrefix;
 		if (!el) return;
-		el.innerHTML = renderMarkdown(src);
+		el.innerHTML = renderMarkdown(src, prefix);
 		renderMermaid(el);
 	});
 </script>
@@ -95,6 +100,9 @@
 	}
 	.markdown :global(a) {
 		color: var(--accent);
+	}
+	.markdown :global(a.issue-key) {
+		white-space: nowrap;
 	}
 	.markdown :global(blockquote) {
 		border-left: 3px solid var(--line-strong);
